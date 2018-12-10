@@ -25,7 +25,7 @@ var gameProperties = {
 var main = function(game) {};
 
 function onsocketConnected() {
-  console.log("Connecté au serveur.");
+  console.log("connected to server");
   createPlayer();
   gameProperties.in_game = true;
   // send the server our initial position and tell it we are connected
@@ -38,7 +38,7 @@ function onRemovePlayer(data) {
   var removePlayer = findplayerbyid(data.id);
   // Player not found
   if (!removePlayer) {
-    console.log("Joueur non trouvé : ", data.id);
+    console.log("Player not found: ", data.id);
     return;
   }
 
@@ -94,7 +94,6 @@ var remote_player = function(id, startx, starty, start_angle) {
 //Server will tell us when a new enemy player connects to the server.
 //We create a new enemy in our game.
 function onNewPlayer(data) {
-  console.log(data);
   //enemy object
   var new_enemy = new remote_player(data.id, data.x, data.y, data.angle);
   enemies.push(new_enemy);
@@ -103,16 +102,45 @@ function onNewPlayer(data) {
 //Server tells us there is a new enemy movement. We find the moved enemy
 //and sync the enemy movement with the server
 function onEnemyMove(data) {
-  console.log(data.id);
-  console.log(enemies);
+  console.log("moving enemy");
+
   var movePlayer = findplayerbyid(data.id);
 
   if (!movePlayer) {
     return;
   }
-  movePlayer.player.body.x = data.x;
-  movePlayer.player.body.y = data.y;
-  movePlayer.player.angle = data.angle;
+
+  var newPointer = {
+    x: data.x,
+    y: data.y,
+    worldX: data.x,
+    worldY: data.y
+  };
+
+  var distance = distanceToPointer(movePlayer.player, newPointer);
+  speed = distance / 0.05;
+
+  movePlayer.rotation = movetoPointer(movePlayer.player, speed, newPointer);
+}
+
+//we're receiving the calculated position from the server and changing the player position
+function onInputRecieved(data) {
+  //we're forming a new pointer with the new position
+  var newPointer = {
+    x: data.x,
+    y: data.y,
+    worldX: data.x,
+    worldY: data.y
+  };
+
+  var distance = distanceToPointer(player, newPointer);
+  //we're receiving player position every 50ms. We're interpolating
+  //between the current position and the new position so that player
+  //does jerk.
+  speed = distance / 0.05;
+
+  //move to the new position.
+  player.rotation = movetoPointer(player, speed, newPointer);
 }
 
 //This is where we use the socket id.
@@ -150,16 +178,17 @@ main.prototype = {
 
   create: function() {
     game.stage.backgroundColor = 0xe1a193;
-    console.log("Client demarrer !");
+    console.log("client started");
     socket.on("connect", onsocketConnected);
 
     //listen to new enemy connections
     socket.on("new_enemyPlayer", onNewPlayer);
     //listen to enemy movement
     socket.on("enemy_move", onEnemyMove);
-
-    // when received remove_player, remove the player passed;
+    //when received remove_player, remove the player passed;
     socket.on("remove_player", onRemovePlayer);
+    //when the player receives the new input
+    socket.on("input_recieved", onInputRecieved);
   },
 
   update: function() {
@@ -167,19 +196,16 @@ main.prototype = {
 
     //move the player when the player is made
     if (gameProperties.in_game) {
+      //we're making a new mouse pointer and sending this input to
+      //the server.
       var pointer = game.input.mousePointer;
 
-      if (distanceToPointer(player, pointer) <= 50) {
-        movetoPointer(player, 0, pointer, 100);
-      } else {
-        movetoPointer(player, 500, pointer);
-      }
-
       //Send a new position data to the server
-      socket.emit("move_player", {
-        x: player.x,
-        y: player.y,
-        angle: player.angle
+      socket.emit("input_fired", {
+        pointer_x: pointer.x,
+        pointer_y: pointer.y,
+        pointer_worldx: pointer.worldX,
+        pointer_worldy: pointer.worldY
       });
     }
   }
